@@ -25,66 +25,82 @@
       margin-top: 20px;
       display: none;
     }
+    #btnShare {
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+    }
   </style>
 </head>
 <body>
 
-<div id="message">Récupération de ta position…</div>
+<div id="message">Clique sur le bouton pour partager ta position</div>
+<button id="btnShare">Partager ma position 📍</button>
 <div id="map"></div>
 
 <!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
 <script>
-  // 1. Récupération du PSID dans l’URL
   const params = new URLSearchParams(window.location.search);
   const psid = params.get('psid');
+  const btn = document.getElementById('btnShare');
+  const messageDiv = document.getElementById('message');
+  const mapDiv = document.getElementById('map');
 
-  if (!psid) {
-    document.getElementById('message').innerText = "Erreur : PSID manquant dans l’URL.";
-  } else {
-    // 2. Demande de géolocalisation automatique
-    navigator.geolocation.getCurrentPosition(successCallback, errorCallback);
-  }
-
-  async function successCallback(position) {
-    const latitude = position.coords.latitude;
-    const longitude = position.coords.longitude;
-
-    // Envoi au webhook Make
-    try {
-      await fetch("https://hook.eu1.make.com/8i2dij7l9qb6h1pu7jqyfw9o244rvl1s", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          psid: psid,
-          latitude: latitude,
-          longitude: longitude
-        })
-      });
-
-      // Affichage du message de confirmation
-      document.getElementById('message').innerText = "J'ai bien reçu ta position ! 👌";
-
-      // Affichage de la carte
-      const mapDiv = document.getElementById('map');
-      mapDiv.style.display = "block";
-
-      const map = L.map('map').setView([latitude, longitude], 15);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19
-      }).addTo(map);
-
-      L.marker([latitude, longitude]).addTo(map);
-
-    } catch (error) {
-      document.getElementById('message').innerText = "Erreur lors de l’envoi de la position.";
+  btn.addEventListener('click', () => {
+    if (!psid) {
+      messageDiv.innerText = "Erreur : PSID manquant dans l’URL.";
+      return;
     }
-  }
 
-  function errorCallback(error) {
-    document.getElementById('message').innerText = "Impossible de récupérer ta position.";
-  }
+    if (!navigator.geolocation) {
+      messageDiv.innerText = "Géolocalisation non supportée par ce navigateur.";
+      return;
+    }
+
+    messageDiv.innerText = "Récupération de ta position…";
+
+    navigator.geolocation.getCurrentPosition(async (position) => {
+      const latitude = position.coords.latitude;
+      const longitude = position.coords.longitude;
+
+      try {
+        await fetch("https://hook.eu1.make.com/8i2dij7l9qb6h1pu7jqyfw9o244rvl1s", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            psid: psid,
+            latitude: latitude,
+            longitude: longitude
+          })
+        });
+
+        messageDiv.innerText = "J'ai bien reçu ta position ! 👌";
+
+        // Affiche la carte avec pin
+        mapDiv.style.display = "block";
+        const map = L.map('map').setView([latitude, longitude], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+        L.marker([latitude, longitude]).addTo(map);
+
+        // Désactive le bouton après envoi
+        btn.disabled = true;
+
+      } catch (err) {
+        messageDiv.innerText = "Erreur lors de l’envoi de la position.";
+        console.error(err);
+      }
+
+    }, (error) => {
+      messageDiv.innerText = "Impossible de récupérer ta position.";
+      console.error(error);
+    });
+  });
 </script>
 
 </body>
