@@ -1,60 +1,91 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="fr">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Partager ma position</title>
-<style>body{font-family:system-ui,Arial;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px}button{padding:12px 18px;border-radius:8px;font-size:16px}</style>
+  <meta charset="UTF-8">
+  <title>Partager ma position</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      text-align: center;
+    }
+    #message {
+      margin-bottom: 20px;
+      font-size: 18px;
+      font-weight: bold;
+    }
+    #map {
+      width: 100%;
+      height: 400px;
+      margin-top: 20px;
+      display: none;
+    }
+  </style>
 </head>
 <body>
-  <div>
-    <h2>Partage ta position</h2>
-    <p id="status">Appuie sur le bouton pour partager ta position.</p>
-    <button id="btn">Partager ma position</button>
-  </div>
+
+<div id="message">Récupération de ta position…</div>
+<div id="map"></div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
 <script>
-const makeWebhook = "https://hook.eu1.make.com/8i2dij7l9qb6h1pu7jqyfw9o244rvl1s"; // <-- remplace par ton webhook Make
-function getQuery(name){ try{ const u=new URL(location.href); return u.searchParams.get(name);}catch(e){return "";}}
-const userIdFromQuery = getQuery("user_id") || "";
+  // 1. Récupération du PSID dans l’URL
+  const params = new URLSearchParams(window.location.search);
+  const psid = params.get('psid');
 
-const status = document.getElementById("status");
-const btn = document.getElementById("btn");
+  if (!psid) {
+    document.getElementById('message').innerText = "Erreur : PSID manquant dans l’URL.";
+  } else {
+    // 2. Demande de géolocalisation automatique
+    navigator.geolocation.getCurrentPosition(successCallback, errorCallback);
+  }
 
-btn.addEventListener("click", () => {
-  if (!navigator.geolocation) { status.textContent = "Ton navigateur ne supporte pas la géoloc."; return; }
-  status.textContent = "Demande de position…";
-  navigator.geolocation.getCurrentPosition(success, error, { enableHighAccuracy: true, timeout:15000 });
-});
+  async function successCallback(position) {
+    const latitude = position.coords.latitude;
+    const longitude = position.coords.longitude;
 
-function success(pos){
-  const lat = pos.coords.latitude;
-  const lng = pos.coords.longitude;
-  status.textContent = `Coord récupérées: ${lat.toFixed(5)}, ${lng.toFixed(5)} — j'envoie…`;
+    // Envoi au webhook Make
+    try {
+      await fetch("https://hook.eu1.make.com/8i2dij7l9qb6h1pu7jqyfw9o244rvl1s", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          psid: psid,
+          latitude: latitude,
+          longitude: longitude
+        })
+      });
 
-  const payload = {
-    user_id: userIdFromQuery,
-    latitude: lat,
-    longitude: lng,
-    timestamp: new Date().toISOString()
-  };
+      // Affichage du message de confirmation
+      document.getElementById('message').innerText = "J'ai bien reçu ta position ! 👌";
 
-  fetch(makeWebhook, {
-    method: "POST",
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
-  .then(r => {
-    if(!r.ok) throw new Error('HTTP ' + r.status);
-    status.textContent = "Position envoyée. Merci !";
-    try{ window.parent.postMessage({action:'close'}, '*'); }catch(e){}
-  })
-  .catch(err => { status.textContent = "Erreur envoi: " + err.message; });
-}
+      // Affichage de la carte
+      const mapDiv = document.getElementById('map');
+      mapDiv.style.display = "block";
 
-function error(err){
-  status.textContent = "Impossible d'obtenir la position. Vérifie les permissions GPS.";
-}
+      const map = L.map('map').setView([latitude, longitude], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+      }).addTo(map);
+
+      L.marker([latitude, longitude]).addTo(map);
+
+    } catch (error) {
+      document.getElementById('message').innerText = "Erreur lors de l’envoi de la position.";
+    }
+  }
+
+  function errorCallback(error) {
+    document.getElementById('message').innerText = "Impossible de récupérer ta position.";
+  }
 </script>
+
 </body>
 </html>
