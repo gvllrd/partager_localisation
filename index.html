@@ -1,107 +1,170 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <title>Partager ma position</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      text-align: center;
-    }
-    #message {
-      margin-bottom: 20px;
-      font-size: 18px;
-      font-weight: bold;
-    }
-    #map {
-      width: 100%;
-      height: 400px;
-      margin-top: 20px;
-      display: none;
-    }
-    #btnShare {
-      padding: 10px 20px;
-      font-size: 16px;
-      cursor: pointer;
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 5px;
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Partager ma position</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<style>
+  body{font-family:system-ui,Arial;margin:0;padding:18px;color:#111;background:#fff}
+  .wrap{max-width:720px;margin:0 auto;text-align:center}
+  #message{font-size:18px;margin:8px 0 14px}
+  #btnShare,#btnOpenExternal{padding:12px 18px;border-radius:10px;border:0;font-size:16px;cursor:pointer}
+  #btnShare{background:#0a84ff;color:#fff}
+  #btnOpenExternal{background:#ff3b30;color:#fff;margin-top:10px}
+  #map{width:100%;height:360px;margin-top:18px;display:none;border-radius:8px;overflow:hidden}
+  #debug{font-size:12px;color:#666;margin-top:10px}
+</style>
 </head>
 <body>
+  <div class="wrap">
+    <h2>Partager ta position</h2>
+    <div id="message">Préparation…</div>
+    <button id="btnShare" style="display:none">Partager ma position 📍</button>
+    <button id="btnOpenExternal" style="display:none">Ouvrir dans le navigateur (recommandé)</button>
+    <div id="map"></div>
+    <div id="debug" style="display:none"></div>
+  </div>
 
-<div id="message">Clique sur le bouton pour partager ta position</div>
-<button id="btnShare">Partager ma position 📍</button>
-<div id="map"></div>
-
-<!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
 <script>
+(async function(){
+  const webhook = "https://hook.eu1.make.com/8i2dij7l9qb6h1pu7jqyfw9o244rvl1s";
   const params = new URLSearchParams(window.location.search);
-  const psid = params.get('psid');
-  const btn = document.getElementById('btnShare');
+  const psid = params.get('psid') || '';
+  const external = params.get('external') === '1';
   const messageDiv = document.getElementById('message');
+  const btnShare = document.getElementById('btnShare');
+  const btnOpenExternal = document.getElementById('btnOpenExternal');
   const mapDiv = document.getElementById('map');
+  const debug = document.getElementById('debug');
 
-  btn.addEventListener('click', () => {
-    if (!psid) {
-      messageDiv.innerText = "Erreur : PSID manquant dans l’URL.";
-      return;
+  function showDebug(txt){ debug.style.display='block'; debug.innerText = txt; }
+
+  if(!psid){
+    messageDiv.innerText = "Erreur : PSID manquant dans l'URL.";
+    return;
+  }
+
+  // Fonction pour envoyer coords
+  async function sendCoords(lat, lng){
+    try{
+      await fetch(webhook, {
+        method:'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ psid: psid, latitude: lat, longitude: lng, source: external ? 'external' : 'webview', ts: new Date().toISOString() })
+      });
+      messageDiv.innerText = "J'ai bien reçu ta position ! 👌";
+      showMap(lat, lng);
+    }catch(e){
+      messageDiv.innerText = "Erreur en envoyant la position.";
+      showDebug('Webhook error: ' + e.message);
     }
+  }
 
-    if (!navigator.geolocation) {
-      messageDiv.innerText = "Géolocalisation non supportée par ce navigateur.";
-      return;
+  // Affiche la carte Leaflet
+  function showMap(lat, lng){
+    mapDiv.style.display = 'block';
+    try{
+      const map = L.map('map').setView([lat, lng], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(map);
+      L.marker([lat, lng]).addTo(map);
+    }catch(e){
+      showDebug('Leaflet error: ' + e.message);
     }
+    // Désactiver boutons
+    btnShare.style.display='none';
+    btnOpenExternal.style.display='none';
+  }
 
-    messageDiv.innerText = "Récupération de ta position…";
+  // Tentative de geoloc (callback)
+  function attemptGeoloc(auto=false){
+    messageDiv.innerText = auto ? "Tentative de localisation…" : "Clique pour partager ta position";
+    btnShare.style.display = auto ? 'none' : 'inline-block';
+    // Timeout safety
+    let didRespond = false;
+    const onSuccess = pos => {
+      if(didRespond) return;
+      didRespond = true;
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      sendCoords(lat, lng);
+    };
+    const onError = err => {
+      if(didRespond) return;
+      didRespond = true;
+      showDebug('Geoloc error: ' + (err && err.message ? err.message : JSON.stringify(err)));
+      messageDiv.innerText = "Impossible de récupérer automatiquement la position.";
+      // Propose ouverture externe
+      btnOpenExternal.style.display = 'inline-block';
+      btnShare.style.display = 'inline-block';
+    };
+    try{
+      navigator.geolocation.getCurrentPosition(onSuccess, onError, { enableHighAccuracy: true, timeout:12000, maximumAge:0 });
+      // fallback timeout in case browser never calls callbacks
+      setTimeout(()=>{ if(!didRespond){ onError({message:'timeout'}) } }, 14000);
+    }catch(e){
+      onError(e);
+    }
+  }
 
-    navigator.geolocation.getCurrentPosition(async (position) => {
-      const latitude = position.coords.latitude;
-      const longitude = position.coords.longitude;
+  // If we are in external mode, auto-run geoloc immediately
+  if(external){
+    // auto-run
+    attemptGeoloc(true);
+  } else {
+    // We are inside WebView: try a quick auto attempt (some will succeed), else show manual button
+    // Attempt auto, but if it's blocked quickly, user will see buttons
+    try{
+      // Some WebViews completely block geolocation; doing an auto attempt will either succeed or fail fast
+      attemptGeoloc(true);
+      // show manual UI after small delay in case auto is blocked silently
+      setTimeout(()=>{
+        // if no map and message wasn't success, show manual button
+        if(mapDiv.style.display !== 'block'){
+          btnOpenExternal.style.display = 'inline-block';
+          btnShare.style.display = 'inline-block';
+          if(messageDiv.innerText.indexOf('Impossible') === -1) messageDiv.innerText = "Si la géoloc ne fonctionne pas ici, ouvre dans le navigateur.";
+        }
+      },1500);
+    }catch(e){
+      // definitely blocked
+      btnOpenExternal.style.display = 'inline-block';
+      btnShare.style.display = 'inline-block';
+      messageDiv.innerText = "Ouvre dans le navigateur pour partager ta position.";
+    }
+  }
 
-      try {
-        await fetch("https://hook.eu1.make.com/8i2dij7l9qb6h1pu7jqyfw9o244rvl1s", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            psid: psid,
-            latitude: latitude,
-            longitude: longitude
-          })
-        });
-
-        messageDiv.innerText = "J'ai bien reçu ta position ! 👌";
-
-        // Affiche la carte avec pin
-        mapDiv.style.display = "block";
-        const map = L.map('map').setView([latitude, longitude], 15);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
-        L.marker([latitude, longitude]).addTo(map);
-
-        // Désactive le bouton après envoi
-        btn.disabled = true;
-
-      } catch (err) {
-        messageDiv.innerText = "Erreur lors de l’envoi de la position.";
-        console.error(err);
-      }
-
-    }, (error) => {
-      messageDiv.innerText = "Impossible de récupérer ta position.";
-      console.error(error);
-    });
+  // Button handlers
+  btnShare.addEventListener('click', ()=>{
+    // user-initiated geoloc (works more often on mobile)
+    attemptGeoloc(false);
   });
-</script>
 
+  btnOpenExternal.addEventListener('click', ()=>{
+    // Open same URL but with external=1 in a new window/tab
+    const base = window.location.origin + window.location.pathname;
+    const newUrl = base + '?psid=' + encodeURIComponent(psid) + '&external=1';
+    // open in new tab (best-effort to force external browser)
+    const w = window.open(newUrl, '_blank', 'noopener,noreferrer');
+    if(!w){
+      // popup blocked: try location.href (may open in-app). Show user instructions
+      messageDiv.innerText = "Impossible d'ouvrir automatiquement. Clique le lien long press et 'Ouvrir dans le navigateur'.";
+      // create fallback clickable link
+      const a = document.createElement('a');
+      a.href = newUrl;
+      a.innerText = "Ouvrir la page dans le navigateur";
+      a.style.display='block';
+      a.style.marginTop='12px';
+      a.style.color='#007AFF';
+      document.querySelector('.wrap').appendChild(a);
+    } else {
+      // optionally show message
+      messageDiv.innerText = "Ouverture du navigateur…";
+    }
+  });
+
+})();
+</script>
 </body>
 </html>
